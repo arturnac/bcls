@@ -1,0 +1,538 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+
+  Partition Update CFN Stack
+  
+Metadata:
+
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: Specify Environment Details
+        Parameters:
+          - pVPC
+          - pSubnets
+      -
+        Label:
+          default: Specify Lambda Function Parameters
+        Parameters:
+          - pLambdaFunctionMemSize
+          - pLambdaRuntime
+          - pLambdaTimeOut
+          - pUpdatePartitionLambdaName
+          - pDeadLetterAlertLambdaName
+          - pSnsAlertTopic
+          - pSnsEndpointSecurityGroup
+
+Parameters:
+
+  pVPC:
+    Description: "Specifies the VPC for the Infrastructure to provision."
+    Type: AWS::EC2::VPC::Id
+  pSubnets:
+    Description: "Specifies the Subnet for the Infrastructure to provision."
+    Type: List<AWS::EC2::Subnet::Id>
+  pUpdatePartitionLambdaName: 
+    Description: "Specifies the Name of the Update Partition Lambda Function."
+    Type: String
+    Default: Glue-Partition-Update-Lambda
+  pDeadLetterAlertLambdaName: 
+    Description: "Specifies the Name of the Dead Letter Alert Lambda Function."
+    Type: String
+    Default: Dead-Letter-Alert-Lambda
+  pLambdaFunctionMemSize: 
+    Description: "Specifies the Memory Size for the Lambda Functions"
+    Type: String
+    AllowedValues: [ "128", "192", "256", "320", "384", "448", "512", "576", "640", "704", "768", "832", "896", "960", "1024", "1088", "1152", "1216", "1280", "1344", "1408", "1472", "1536", "1600", "1664", "1728", "1792", "1856", "1920", "1984", "2048", "2112", "2176", "2240", "2304", "2368", "2432", "2496", "2560", "2624", "2688", "2752", "2816", "2880", "2944", "3008", "3072"]
+    Default: "1024"
+  pLambdaRuntime:
+    Description: "Specifies the Runtime for the Lambda Functions"
+    Type: String
+    AllowedValues: [ "python3.7", "python3.8", "python3.9" ]
+    Default: "python3.9"
+  pLambdaTimeOut:
+    Description: "Specifies the Timeout value in seconds for the Lambda Functions"
+    Type: String
+    Default: "60"
+  pSnsAlertTopic:
+    Description: "Specifies the SNS Topic which to return success or failure messages"
+    Type: String
+  pSnsEndpointSecurityGroup:
+    Description: "Specifies the Security Group associated with the SNS VPC Endpoint"
+    Type: String
+
+Resources:
+
+  #~~~~~~~~~~~~~~
+  # ENDPOINTS
+  #~~~~~~~~~~~~~~
+
+  rGlueEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: "Security-Group-Glue-Endpoint"
+      GroupDescription: "Security Group for the Glue Endpoint"
+      SecurityGroupEgress:
+        - 
+          IpProtocol: "-1"
+          FromPort: "-1"
+          ToPort: "-1"
+          CidrIp: "0.0.0.0/0"
+      VpcId: !Ref pVPC
+  rGlueEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties: 
+      PrivateDnsEnabled: False
+      SecurityGroupIds:
+        - !GetAtt rGlueEndpointSecurityGroup.GroupId
+      ServiceName: !Join [ ".", [ "com.amazonaws", !Ref AWS::Region, "glue" ] ]
+      SubnetIds: !Ref pSubnets
+      VpcEndpointType: Interface
+      VpcId: !Ref pVPC
+  rGlueEndpointSgIngress: 
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties: 
+      Description: String
+      FromPort: "443"
+      GroupId:  !GetAtt rGlueEndpointSecurityGroup.GroupId      
+      IpProtocol: "TCP"
+      SourceSecurityGroupId: !GetAtt rLambdaSecurityGroup.GroupId
+      ToPort: "443"
+
+  # rSnsEndpointSecurityGroup:
+  #   Type: AWS::EC2::SecurityGroup
+  #   Properties:
+  #     GroupName: "Security-Group-Sns-Endpoint"
+  #     GroupDescription: "Security Group for the Sns Endpoint"
+  #     SecurityGroupEgress:
+  #       - 
+  #         IpProtocol: "-1" 
+  #         FromPort: "-1"
+  #         ToPort: "-1"
+  #         CidrIp: "0.0.0.0/0"
+  #     VpcId: !Ref pVPC
+  # rSnsEndpoint:
+  #   Type: AWS::EC2::VPCEndpoint
+  #   Properties: 
+  #     PrivateDnsEnabled: True 
+  #     SecurityGroupIds:
+  #       - !GetAtt rSnsEndpointSecurityGroup.GroupId
+  #     ServiceName: !Join [ ".", [ "com.amazonaws", !Ref AWS::Region, "sns" ] ]
+  #     SubnetIds: !Ref pSubnets
+  #     VpcEndpointType: Interface
+  #     VpcId: !Ref pVPC
+  # rSnsEndpointSgIngress: 
+  #   Type: AWS::EC2::SecurityGroupIngress
+  #   Properties: 
+  #     Description: String
+  #     FromPort: "443"
+  #     GroupId:  !GetAtt rSnsEndpointSecurityGroup.GroupId      
+  #     IpProtocol: "TCP"
+  #     SourceSecurityGroupId: !GetAtt rLambdaSecurityGroup.GroupId
+  #     ToPort: "443"
+
+  # rSqsEndpointSecurityGroup:
+  #   Type: AWS::EC2::SecurityGroup
+  #   Properties:
+  #     GroupName: "Security-Group-Sqs-Endpoint"
+  #     GroupDescription: "Security Group for the Sqs Endpoint"
+  #     SecurityGroupEgress:
+  #       - 
+  #         IpProtocol: "-1"
+  #         FromPort: "-1"
+  #         ToPort: "-1"
+  #         CidrIp: "0.0.0.0/0"
+  #     VpcId: !Ref pVPC
+  # rSqsEndpoint:
+  #   Type: AWS::EC2::VPCEndpoint
+  #   Properties: 
+  #     PrivateDnsEnabled: False
+  #     SecurityGroupIds:
+  #       - !GetAtt rSqsEndpointSecurityGroup.GroupId
+  #     ServiceName: !Join [ ".", [ "com.amazonaws", !Ref AWS::Region, "sqs" ] ]
+  #     SubnetIds: !Ref pSubnets
+  #     VpcEndpointType: Interface
+  #     VpcId: !Ref pVPC
+  # rSqsEndpointSgIngress: 
+  #   Type: AWS::EC2::SecurityGroupIngress
+  #   Properties: 
+  #     Description: String
+  #     FromPort: "443"
+  #     GroupId:  !GetAtt rSqsEndpointSecurityGroup.GroupId
+  #     IpProtocol: "TCP"
+  #     SourceSecurityGroupId: !GetAtt rLambdaSecurityGroup.GroupId
+  #     ToPort: "443"
+
+  #~~~~~~~~~~~~~~
+  # SQS
+  #~~~~~~~~~~~~~~
+
+  rDlqSqsQueue:
+    Type: AWS::SQS::Queue
+    Properties:                  
+      QueueName: DLQ-SQS-Queue
+      VisibilityTimeout: 120 # needs to be more than the lambda timeout value
+  rSqsQueue:
+    Type: AWS::SQS::Queue
+    Properties:                  
+      QueueName: SQS-Queue
+      VisibilityTimeout: 120 # needs to be more than the lambda timeout value
+      RedrivePolicy: 
+        deadLetterTargetArn: !GetAtt rDlqSqsQueue.Arn
+        maxReceiveCount: 2
+
+  #~~~~~~~~~~~~~~
+  # LAMBDA
+  #~~~~~~~~~~~~~~
+
+  rLambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Join [ "-", [ "Security-Group", !Ref pUpdatePartitionLambdaName ] ]
+      GroupDescription: !Join [ " ", [ "Security Group for the", !Ref pUpdatePartitionLambdaName, "Lambda Function" ] ]
+      SecurityGroupEgress:
+        - 
+          IpProtocol: "-1"
+          FromPort: "-1"
+          ToPort: "-1"
+          DestinationSecurityGroupId: !GetAtt rGlueEndpointSecurityGroup.GroupId
+        - 
+          IpProtocol: "-1"
+          FromPort: "-1"
+          ToPort: "-1"
+          DestinationSecurityGroupId: !Ref pSnsEndpointSecurityGroup     
+        # - 
+        #   IpProtocol: "-1"
+        #   FromPort: "-1"
+        #   ToPort: "-1"
+        #   DestinationSecurityGroupId: !GetAtt rSnsEndpointSecurityGroup.GroupId
+      VpcId: !Ref pVPC
+  rExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: 'svc-LambdaUpdatePartitionModule'
+      PermissionsBoundary: !Sub 'arn:aws:iam::${AWS::AccountId}:policy/core-ServiceRolePermissionsBoundary'
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [lambda.amazonaws.com]
+            Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - 
+                Effect: Allow
+                Action: [
+                  "logs:CreateLogGroup",
+                  "logs:CreateLogStream",
+                  "logs:PutLogEvents"
+                ]
+                Resource: [
+                  !Sub "arn:aws:logs:*:*:log-group:/aws/lambda/${pUpdatePartitionLambdaName}:log-stream:*",
+                  !Sub "arn:aws:logs:*:*:log-group:/aws/lambda/${pDeadLetterAlertLambdaName}:log-stream:*",
+                ]
+              - 
+                Effect: "Allow"
+                Action: [
+                  "ec2:CreateNetworkInterface",
+                  "ec2:DescribeNetworkInterfaces",
+                  "ec2:DeleteNetworkInterface",
+                  "glue:GetTable",
+                  "glue:GetPartition",
+                  "glue:GetPartitions",
+                  "glue:UpdatePartition",
+                  "glue:CreatePartition",
+                  "sns:Publish"
+                ]
+                Resource: "*"
+              - 
+                Effect: Allow
+                Action: [
+                  "sqs:ReceiveMessage",
+                  "sqs:DeleteMessage",
+                  "sqs:GetQueueAttributes"
+                ]
+                Resource: [
+                  !GetAtt rSqsQueue.Arn,
+                  !GetAtt rDlqSqsQueue.Arn
+                ]
+  rUpdatePartitionFunction:
+    Type: AWS::Lambda::Function
+    # Code embedded into CFN template for simplicity of deployment
+    Properties:
+      Code:
+        ZipFile: 
+          Fn::Sub: |
+            import boto3
+            import os
+            import copy
+            import logging
+            import json
+            import traceback
+
+            log = logging.getLogger()
+            log.setLevel('INFO')
+
+            SNS_TOPIC_ARN = os.environ.get('SNS_TOPIC_ARN')
+
+            GLUE_ENDPOINT_DNS = os.environ.get('GLUE_ENDPOINT_DNS')
+            glue_url = f'https://{GLUE_ENDPOINT_DNS.split(":")[1]}'
+            glue_client = boto3.client('glue', endpoint_url=glue_url)
+
+            def sns_publish(topic_arn: str, subject: str, message: str, attribstr: str, region: str):
+                log.info(f"Publish to SNS {json.dumps({ 'topic_arn': topic_arn, 'subject': subject, 'message': message, 'region': region, 'messageAttributes': attribstr})}")
+
+                sns_client= boto3.client('sns', region_name=region)
+                
+                sns_client.publish(
+                    TargetArn=topic_arn,
+                    Subject=subject,
+                    Message=message,
+                    MessageAttributes={
+                        'notify_type': {
+                            'DataType': 'String',
+                            'StringValue': attribstr
+                        }
+                    }
+                )
+
+            def handler(event, context):
+
+                for record in event.get('Records'):
+                    try:     
+                        region = record.get('awsRegion')
+                        body = json.loads(record.get('body')) 
+                        log.info(f'body: {body}')
+                        source_key = body.get('partition_prefix')
+
+                        database_name, table_name = body.get('feed').split('#')
+
+                        log.info(f'Database: {database_name} Table: {table_name}')
+
+                        try:                
+                            get_partition_response = glue_client.get_partitions(
+                                DatabaseName=database_name,
+                                TableName=table_name,
+                            )
+                            
+                            log.info(get_partition_response)
+
+                            log.info('Get Table Details.')
+                            get_table_response = glue_client.get_table(
+                                DatabaseName=database_name,
+                                Name=table_name
+                            )
+
+                            storage_descriptor = get_table_response['Table']['StorageDescriptor']
+
+                            custom_storage_descriptor = copy.deepcopy(storage_descriptor)
+                            custom_storage_descriptor['Location'] = source_key
+
+                            log.info(f'custom_storage_descriptor {custom_storage_descriptor}') 
+
+                            log.info(f"Create Partition API Call {json.dumps({ 'DatabaseName': database_name, 'TableName': table_name, 'PartitionValueList': body.get('partition_key').split(','), 'PartitionInput': {'Values': [body.get('business_dt')],'StorageDescriptor': custom_storage_descriptor}})}")
+                            create_partition_response = glue_client.create_partition(
+                                DatabaseName=database_name,
+                                TableName=table_name,                    
+                                PartitionInput={
+                                    'Values': [body.get('business_dt')],
+                                    'StorageDescriptor': custom_storage_descriptor
+                                }
+                            )
+                            log.info(create_partition_response)
+                            log.info('Glue partition created successfully.') 
+                            
+                            sns_publish(SNS_TOPIC_ARN, 'DIH Glue Catalog Partition Refresh message', 'Success', 'dih_glue_add_ptn_success', region)
+
+                        except Exception as e:
+                            log.info('Glue partition creation failed.')
+                            log.error(e)
+                            log.error(traceback.format_exc())
+                            raise e
+
+                    except Exception as e:
+                        log.error(e)
+                        log.error(traceback.format_exc())
+                        raise e
+      Tags: 
+        - Key: "Name"
+          Value: !Ref pUpdatePartitionLambdaName
+      Handler: index.handler
+      Runtime: !Ref pLambdaRuntime
+      Role: !GetAtt rExecutionRole.Arn
+      Timeout: !Ref pLambdaTimeOut
+      MemorySize: !Ref pLambdaFunctionMemSize
+      Description: Lambda Function to Update Glue Partitions
+      FunctionName: !Ref pUpdatePartitionLambdaName
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Ref pSnsAlertTopic
+          GLUE_ENDPOINT_DNS: !Select ["0", !GetAtt rGlueEndpoint.DnsEntries ]
+      VpcConfig:
+        SecurityGroupIds:
+          - !GetAtt rLambdaSecurityGroup.GroupId
+        SubnetIds: !Ref pSubnets
+  rLambdaFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    DependsOn: rUpdatePartitionFunction
+    Properties: 
+      LogGroupName: !Join [ "", [ "/aws/lambda/", !Ref rUpdatePartitionFunction ] ]
+      RetentionInDays: 14
+  rLambdaFunctionEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      BatchSize: 1
+      Enabled: true
+      EventSourceArn: !GetAtt rSqsQueue.Arn
+      FunctionName: !GetAtt rUpdatePartitionFunction.Arn
+  rDeadLetterAlertFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: 
+          Fn::Sub: |
+            import boto3
+            import os
+            import logging
+            import json
+            import traceback
+
+            log = logging.getLogger()
+            log.setLevel('INFO')
+
+            SNS_TOPIC_ARN = os.environ.get('SNS_TOPIC_ARN')
+
+            def sns_publish(topic_arn: str, subject: str, message: str, attribstr: str, region: str):
+                log.info(f"Publishing to SNS {json.dumps({ 'topic_arn': topic_arn, 'subject': subject, 'message': message, 'region': region, 'messageAttributes': attribstr})}")
+
+                sns_client= boto3.client('sns', region_name=region)
+                
+                sns_client.publish(
+                    TargetArn=topic_arn,
+                    Subject=subject,
+                    Message=message,
+                    MessageAttributes={
+                        'notify_type': {
+                            'DataType': 'String',
+                            'StringValue': attribstr
+                        }
+                    }
+                )
+
+            def handler(event, context):
+                log.info(event)
+                for record in event.get('Records'):
+                    try:                    
+                        region = record.get('awsRegion')
+                        log.info(region)
+                        sns_publish(SNS_TOPIC_ARN, 'DIH Glue Catalog Partition Refresh message', 'Failure', 'dih_glue_add_ptn_failure', region )                
+                        
+                    except Exception as e:
+                        log.error(e)
+                        log.error(traceback.format_exc())
+           
+      Tags: 
+        - Key: "Name"
+          Value: !Ref pDeadLetterAlertLambdaName
+      Handler: index.handler
+      Runtime: !Ref pLambdaRuntime
+      Role: !GetAtt rExecutionRole.Arn
+      Timeout: !Ref pLambdaTimeOut
+      MemorySize: !Ref pLambdaFunctionMemSize
+      Description: Lambda Function to Alert on Dead Letter
+      FunctionName: !Ref pDeadLetterAlertLambdaName
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Ref pSnsAlertTopic
+      VpcConfig:
+        SecurityGroupIds:
+          - !GetAtt rLambdaSecurityGroup.GroupId
+        SubnetIds: !Ref pSubnets
+  rDeadLetterLambdaFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    DependsOn: rDeadLetterAlertFunction
+    Properties: 
+      LogGroupName: !Join [ "", [ "/aws/lambda/", !Ref rDeadLetterAlertFunction ] ]
+      RetentionInDays: 14
+  rDeadLetterLambdaFunctionEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      BatchSize: 1
+      Enabled: true
+      EventSourceArn: !GetAtt rDlqSqsQueue.Arn
+      FunctionName: !GetAtt rDeadLetterAlertFunction.Arn
+
+Outputs:
+
+  oUpdatePartitionLambdaFunctionName:
+    Description: "The Name of the Update Partition Lambda Function"
+    Value: !Ref rUpdatePartitionFunction
+    Export:
+      Name: !Sub "${AWS::StackName}-UpdatePartitionLambdaName"
+  oUpdatePartitionLambdaFunctionARN:
+    Description: "The ARN of the Update Partition Lambda Function"
+    Value: !GetAtt rUpdatePartitionFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-UpdatePartitionLambdaARN"
+  oDeadLetterLambdaFunctionName:
+    Description: "The Name of the Dead Letter Alert Lambda Function"
+    Value: !Ref rDeadLetterAlertFunction
+    Export:
+      Name: !Sub "${AWS::StackName}-DeadLetterLambdaName"
+  oDeadLetterLambdaFunctionARN:
+    Description: "The ARN of the Dead Letter Alert Lambda Function"
+    Value: !GetAtt rDeadLetterAlertFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-DeadLetterLambdaARN"  
+  oLambdaRoleARN:
+    Description: "The ARN of the Lambda IAM Role"
+    Value: !GetAtt rExecutionRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-LambdaRoleIamARN"          
+  oSqsARN:
+    Description: "The ARN of the SQS Queue"
+    Value: !GetAtt rSqsQueue.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-SqsARN"
+  oDlqSqsARN:
+    Description: "The ARN of the DLQ SQS Queue"
+    Value: !GetAtt rDlqSqsQueue.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-DlqSqsARN"
+  oGlueDNS1:
+    Description: "The DNS Entries of the Glue Endpoint"
+    Value: !Select ["0", !GetAtt rGlueEndpoint.DnsEntries ]
+    Export:
+      Name: !Sub "${AWS::StackName}-GlueDNS1"
+  oGlueDNS2:
+    Description: "The DNS Entries of the Glue Endpoint"
+    Value: !Select ["1", !GetAtt rGlueEndpoint.DnsEntries ]
+    Export:
+      Name: !Sub "${AWS::StackName}-GlueDNS2"      
+  # oSnsDNS1:
+  #   Description: "The DNS Entries of the SNS Endpoint"
+  #   Value: !Select [ "0", !GetAtt rSnsEndpoint.DnsEntries ]
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-SnsDNS1"
+  # oSnsDNS2:
+  #   Description: "The DNS Entries of the SNS Endpoint"
+  #   Value: !Select [ "1", !GetAtt rSnsEndpoint.DnsEntries ]
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-SnsDNS2"
+  # oSqsDNS1:
+  #   Description: "The DNS Entries of the SQS Endpoint"
+  #   Value: !Select [ "0", !GetAtt rSqsEndpoint.DnsEntries ]
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-SqsDNS1"
+  # oSqsDNS2:
+  #   Description: "The DNS Entries of the SQS Endpoint"
+  #   Value: !Select [ "1", !GetAtt rSqsEndpoint.DnsEntries ]
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-SqsDNS2"      
+  #TODO - output iam role

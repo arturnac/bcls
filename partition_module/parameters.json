@@ -1,0 +1,18 @@
+[
+    {
+        "ParameterKey": "pVPC",
+        "ParameterValue": "vpc-0aadaefe606201a8a"
+    },
+    {
+        "ParameterKey": "pSubnets",
+        "ParameterValue": "subnet-00243bab06e30c3ef,subnet-002094a28b812c402,subnet-07724bad6aace1e6c"
+    },
+    {
+        "ParameterKey": "pSnsAlertTopic",
+        "ParameterValue": "arn:aws:sns:eu-west-2:373560620403:test"
+    },
+    {
+        "ParameterKey": "pSnsEndpointSecurityGroup",
+        "ParameterValue": "???????"
+    }
+]

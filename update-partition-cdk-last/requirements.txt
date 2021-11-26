@@ -1,0 +1,6 @@
+aws-cdk.core>=1.134.0
+aws-cdk.assertions>=1.134.0
+-e .
+aws-cdk.aws-glue
+aws-cdk.aws-lakeformation
+aws-cdk.aws-lambda
